@@ -43,7 +43,6 @@ import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.GnuParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
-import org.apache.commons.cli.ParseException;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -57,6 +56,7 @@ public class SparkLineage {
     public static final String APP = "app";
     public static final String LIBRARY_DEPENDENCIES = "libraryDependencies";
     private static final String JOB_ID = "jobId";
+    private static final String QUERY_TEXT = "queryText";
 
     //cli options
     private static final String ATLAS_ENDPOINT = "a";
@@ -73,15 +73,15 @@ public class SparkLineage {
         try {
             CommandLineParser parser = new GnuParser();
             cmdLine = parser.parse(options, args);
-        } catch(ParseException e) {
+            SparkLineage test = new SparkLineage(cmdLine.getOptionValue(ATLAS_ENDPOINT),
+            cmdLine.getOptionValue(CLUSTER_NAME));
+            test.createTypes();
+            test.createLineage(cmdLine.getOptionValue(SPARK_JOB_ID), cmdLine.getOptionValue(SPARK_PROCESS_NAME));
+        } catch(Exception e) {
+            e.printStackTrace();
             HelpFormatter formatter = new HelpFormatter();
-            formatter.printHelp( "ant", options );
+            formatter.printHelp("hadoop  jar atlas-lineage-0.1.jar org.apache.atlas.lineage.SparkLineage", options );
         }
-
-        SparkLineage test = new SparkLineage(cmdLine.getOptionValue(ATLAS_ENDPOINT),
-                cmdLine.getOptionValue(CLUSTER_NAME));
-        test.createTypes();
-        test.createLineage(cmdLine.getOptionValue(SPARK_JOB_ID), cmdLine.getOptionValue(SPARK_PROCESS_NAME));
     }
 
     public SparkLineage(String endpoint, String clusterName) {
@@ -90,13 +90,6 @@ public class SparkLineage {
     }
 
     private void createLineage(String jobId, String processName) throws AtlasServiceException {
-        try {
-            atlasClient.getEntity(SPARK_PROCESS, AtlasClient.REFERENCEABLE_ATTRIBUTE_NAME, processName);
-            return;
-        } catch (AtlasServiceException e) {
-            //ignore and create instance
-        }
-
         List<Id> inIds = new ArrayList<>();
         String[] intables = {"employees", "departments", "dept_emp"};
         for (String table : intables) {
@@ -116,56 +109,71 @@ public class SparkLineage {
         lineage.set(AtlasClient.OWNER, "etl");
         lineage.set(AtlasClient.DESCRIPTION, "spark etl job to generate emp_dept_flat");
         lineage.set(APP_VERSION, "1.0");
-        lineage.set(APP, "import org.apache.log4j.{Level, Logger}\n" +
-                "import org.apache.spark.sql.DataFrame\n" +
-                "\n" +
-                "val rootLogger = Logger.getRootLogger()\n" +
-                "rootLogger.setLevel(Level.ERROR)\n" +
-                "\n" +
-                "\n" +
-                "def saveToHive(df: DataFrame, databaseName: String, tableName: String) = {\n" +
-                "    val tempTable = s\"${tableName}_tmp_${System.currentTimeMillis / 1000}\"\n" +
-                "    df.registerTempTable(tempTable)\n" +
-                "    sqlContext.sql(s\"create table ${databaseName}.${tableName} stored as ORC as select * from ${tempTable}\")\n" +
-                "    sqlContext.dropTempTable(tempTable)\n" +
-                "\n" +
-                "}\n" +
-                "\n" +
-                "val employees = sqlContext.sql(\"select * from employees.employees\")\n" +
-                "val departments = sqlContext.sql(\"select * from employees.departments\")\n" +
-                "val dept_emp = sqlContext.sql(\"select * from employees.dept_emp\")\n" +
-                "\n" +
-                "val flat = employees.withColumn(\"full_name\", concat(employees(\"last_name\"), lit(\", \"), employees(\"first_name\"))).\n" +
-                "                     select(\"full_name\", \"emp_no\").\n" +
-                "                     join(dept_emp,\"emp_no\").\n" +
-                "                     join(departments, \"dept_no\")\n" +
-                "flat.show()\n" +
-                "\n" +
-                "\n" +
-                "saveToHive(flat, \"default\", \"emp_dept_flat\")");
+        String app = "import org.apache.log4j.{Level, Logger}\n<br/>" +
+                "import org.apache.spark.sql.DataFrame\n<br/>" +
+                "\n<br/>" +
+                "val rootLogger = Logger.getRootLogger()\n<br/>" +
+                "rootLogger.setLevel(Level.ERROR)\n<br/>" +
+                "\n<br/>" +
+                "\n<br/>" +
+                "def saveToHive(df: DataFrame, databaseName: String, tableName: String) = {\n<br/>" +
+                "    val tempTable = s\"${tableName}_tmp_${System.currentTimeMillis / 1000}\"\n<br/>" +
+                "    df.registerTempTable(tempTable)\n<br/>" +
+                "    sqlContext.sql(s\"create table ${databaseName}.${tableName} stored as ORC as select * from ${tempTable}\")\n<br/>" +
+                "    sqlContext.dropTempTable(tempTable)\n<br/>" +
+                "\n<br/>" +
+                "}\n<br/>" +
+                "\n<br/>" +
+                "val employees = sqlContext.sql(\"select * from employees.employees\")\n<br/>" +
+                "val departments = sqlContext.sql(\"select * from employees.departments\")\n<br/>" +
+                "val dept_emp = sqlContext.sql(\"select * from employees.dept_emp\")\n<br/>" +
+                "\n<br/>" +
+                "val flat = employees.withColumn(\"full_name\", concat(employees(\"last_name\"), lit(\", \"), employees(\"first_name\"))).\n<br/>" +
+                "                     select(\"full_name\", \"emp_no\").\n<br/>" +
+                "                     join(dept_emp,\"emp_no\").\n<br/>" +
+                "                     join(departments, \"dept_no\")\n<br/>" +
+                "flat.show()\n<br/>" +
+                "\n<br/>" +
+                "\n<br/>" +
+                "saveToHive(flat, \"default\", \"emp_dept_flat\")<br/>";
+        lineage.set(APP, "etl.scala");
+        lineage.set(QUERY_TEXT, app);
         lineage.set(LIBRARY_DEPENDENCIES, "\"org.apache.spark\" %% \"spark-core\" % \"2.1.0\"");
         lineage.set(JOB_ID, jobId);
+
+        try {
+            Referenceable entity = atlasClient.getEntity(SPARK_PROCESS, AtlasClient.REFERENCEABLE_ATTRIBUTE_NAME, processName);
+            atlasClient.updateEntity(entity.getId()._getId(), lineage);
+            System.out.printf("updated id " + entity.getId()._getId());
+        } catch (AtlasServiceException e) {
+            List<String> id = atlasClient.createEntity(lineage);
+            System.out.println("created ids " + id);
+        }
+
 //        System.out.printf("Submitting instance = " + InstanceSerialization.toJson(lineage, true));
-        List<String> id = atlasClient.createEntity(lineage);
-        System.out.println("created ids " + id);
     }
 
     private void createTypes() throws AtlasServiceException {
+        HierarchicalTypeDefinition<ClassType> clsDef = TypesUtil
+                .createClassTypeDef(SPARK_PROCESS, "spark process", ImmutableSet.of(AtlasClient.PROCESS_SUPER_TYPE),
+                        attrDef(APP_VERSION, DataTypes.STRING_TYPE, Multiplicity.REQUIRED),
+                        attrDef(APP, DataTypes.STRING_TYPE, Multiplicity.REQUIRED),
+                        attrDef(JOB_ID, DataTypes.STRING_TYPE, Multiplicity.REQUIRED),
+                        attrDef(QUERY_TEXT, DataTypes.STRING_TYPE, Multiplicity.OPTIONAL),
+                        attrDef(LIBRARY_DEPENDENCIES, DataTypes.arrayTypeName(DataTypes.STRING_TYPE)));
+
+        TypesDef typesDef = TypesUtil.getTypesDef(ImmutableList.<EnumTypeDefinition>of(), ImmutableList.<StructTypeDefinition>of(),
+                ImmutableList.<HierarchicalTypeDefinition<TraitType>>of(),
+                ImmutableList.of(clsDef));
+
+        String typesAsJSON = TypesSerialization.toJson(typesDef);
+        System.out.println("typesAsJSON = " + typesAsJSON);
         if (atlasClient.getType(SPARK_PROCESS) == null) {
-            HierarchicalTypeDefinition<ClassType> clsDef = TypesUtil
-                    .createClassTypeDef(SPARK_PROCESS, "spark process", ImmutableSet.of(AtlasClient.PROCESS_SUPER_TYPE),
-                            attrDef(APP_VERSION, DataTypes.STRING_TYPE, Multiplicity.REQUIRED),
-                            attrDef(APP, DataTypes.STRING_TYPE, Multiplicity.REQUIRED),
-                            attrDef(JOB_ID, DataTypes.STRING_TYPE, Multiplicity.REQUIRED),
-                            attrDef(LIBRARY_DEPENDENCIES, DataTypes.arrayTypeName(DataTypes.STRING_TYPE)));
-
-            TypesDef typesDef = TypesUtil.getTypesDef(ImmutableList.<EnumTypeDefinition>of(), ImmutableList.<StructTypeDefinition>of(),
-                    ImmutableList.<HierarchicalTypeDefinition<TraitType>>of(),
-                    ImmutableList.of(clsDef));
-
-            String typesAsJSON = TypesSerialization.toJson(typesDef);
-            System.out.println("typesAsJSON = " + typesAsJSON);
+            System.out.println("Creating type");
             atlasClient.createType(typesAsJSON);
+        } else {
+            System.out.println("Updating type");
+            atlasClient.updateType(typesAsJSON);
         }
     }
 
@@ -177,13 +185,13 @@ public class SparkLineage {
             String reverseAttributeName) {
         Preconditions.checkNotNull(name);
         Preconditions.checkNotNull(dT);
-        return new AttributeDefinition(name, dT.getName(), m, isComposite, reverseAttributeName);
+        return new AttributeDefinition(name, dT.getName(), m, isComposite, false, false, reverseAttributeName);
     }
 
     AttributeDefinition attrDef(String name, String typeName) {
         Preconditions.checkNotNull(name);
         Preconditions.checkNotNull(typeName);
-        return new AttributeDefinition(name, typeName, Multiplicity.OPTIONAL, false, null);
+        return new AttributeDefinition(name, typeName, Multiplicity.OPTIONAL, false, false, false, null);
     }
 
     private static Options configureOptions() {
