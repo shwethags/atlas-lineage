@@ -26,6 +26,7 @@ import org.apache.atlas.AtlasClient;
 import org.apache.atlas.AtlasServiceException;
 import org.apache.atlas.typesystem.Referenceable;
 import org.apache.atlas.typesystem.TypesDef;
+import org.apache.atlas.typesystem.json.InstanceSerialization;
 import org.apache.atlas.typesystem.json.TypesSerialization;
 import org.apache.atlas.typesystem.persistence.Id;
 import org.apache.atlas.typesystem.types.AttributeDefinition;
@@ -104,39 +105,39 @@ public class SparkLineage {
         Referenceable lineage = new Referenceable(SPARK_PROCESS);
         lineage.set(AtlasClient.PROCESS_ATTRIBUTE_INPUTS, inIds);
         lineage.set(AtlasClient.PROCESS_ATTRIBUTE_OUTPUTS, Arrays.asList(new Id(outid, 1, HIVE_TABLE)));
-        lineage.set(AtlasClient.NAME, processName);
         lineage.set(AtlasClient.REFERENCEABLE_ATTRIBUTE_NAME, processName);
         lineage.set(AtlasClient.OWNER, "etl");
         lineage.set(AtlasClient.DESCRIPTION, "spark etl job to generate emp_dept_flat");
         lineage.set(APP_VERSION, "1.0");
-        String app = "import org.apache.log4j.{Level, Logger}\n<br/>" +
-                "import org.apache.spark.sql.DataFrame\n<br/>" +
-                "\n<br/>" +
-                "val rootLogger = Logger.getRootLogger()\n<br/>" +
-                "rootLogger.setLevel(Level.ERROR)\n<br/>" +
-                "\n<br/>" +
-                "\n<br/>" +
-                "def saveToHive(df: DataFrame, databaseName: String, tableName: String) = {\n<br/>" +
-                "    val tempTable = s\"${tableName}_tmp_${System.currentTimeMillis / 1000}\"\n<br/>" +
-                "    df.registerTempTable(tempTable)\n<br/>" +
-                "    sqlContext.sql(s\"create table ${databaseName}.${tableName} stored as ORC as select * from ${tempTable}\")\n<br/>" +
-                "    sqlContext.dropTempTable(tempTable)\n<br/>" +
-                "\n<br/>" +
-                "}\n<br/>" +
-                "\n<br/>" +
-                "val employees = sqlContext.sql(\"select * from employees.employees\")\n<br/>" +
-                "val departments = sqlContext.sql(\"select * from employees.departments\")\n<br/>" +
-                "val dept_emp = sqlContext.sql(\"select * from employees.dept_emp\")\n<br/>" +
-                "\n<br/>" +
-                "val flat = employees.withColumn(\"full_name\", concat(employees(\"last_name\"), lit(\", \"), employees(\"first_name\"))).\n<br/>" +
-                "                     select(\"full_name\", \"emp_no\").\n<br/>" +
-                "                     join(dept_emp,\"emp_no\").\n<br/>" +
-                "                     join(departments, \"dept_no\")\n<br/>" +
-                "flat.show()\n<br/>" +
-                "\n<br/>" +
-                "\n<br/>" +
-                "saveToHive(flat, \"default\", \"emp_dept_flat\")<br/>";
+        String app = "import org.apache.log4j.{Level, Logger}<br/>\n" +
+                "import org.apache.spark.sql.DataFrame<br/>\n" +
+                "<br/>\n" +
+                "val rootLogger = Logger.getRootLogger()<br/>\n" +
+                "rootLogger.setLevel(Level.ERROR)<br/>\n" +
+                "<br/>\n" +
+                "<br/>\n" +
+                "def saveToHive(df: DataFrame, databaseName: String, tableName: String) = {<br/>\n" +
+                "    val tempTable = s\"${tableName}_tmp_${System.currentTimeMillis / 1000}\"<br/>\n" +
+                "    df.registerTempTable(tempTable)<br/>\n" +
+                "    sqlContext.sql(s\"create table ${databaseName}.${tableName} stored as ORC as select * from ${tempTable}\")<br/>\n" +
+                "    sqlContext.dropTempTable(tempTable)<br/>\n" +
+                "<br/>\n" +
+                "}<br/>\n" +
+                "<br/>\n" +
+                "val employees = sqlContext.sql(\"select * from employees.employees\")<br/>\n" +
+                "val departments = sqlContext.sql(\"select * from employees.departments\")<br/>\n" +
+                "val dept_emp = sqlContext.sql(\"select * from employees.dept_emp\")<br/>\n" +
+                "<br/>\n" +
+                "val flat = employees.withColumn(\"full_name\", concat(employees(\"last_name\"), lit(\", \"), employees(\"first_name\"))).<br/>\n" +
+                "                     select(\"full_name\", \"emp_no\").<br/>\n" +
+                "                     join(dept_emp,\"emp_no\").<br/>\n" +
+                "                     join(departments, \"dept_no\")<br/>\n" +
+                "flat.show()<br/>\n" +
+                "<br/>\n" +
+                "<br/>\n" +
+                "saveToHive(flat, \"employees\", \"emp_dept_flat\")<br/>";
         lineage.set(APP, "etl.scala");
+        lineage.set(AtlasClient.NAME, app);
         lineage.set(QUERY_TEXT, app);
         lineage.set(LIBRARY_DEPENDENCIES, "\"org.apache.spark\" %% \"spark-core\" % \"2.1.0\"");
         lineage.set(JOB_ID, jobId);
@@ -146,7 +147,7 @@ public class SparkLineage {
             atlasClient.updateEntity(entity.getId()._getId(), lineage);
             System.out.printf("updated id " + entity.getId()._getId());
         } catch (AtlasServiceException e) {
-            List<String> id = atlasClient.createEntity(lineage);
+            List<String> id = atlasClient.createEntity(InstanceSerialization.toJson(lineage, true));
             System.out.println("created ids " + id);
         }
 
@@ -168,7 +169,13 @@ public class SparkLineage {
 
         String typesAsJSON = TypesSerialization.toJson(typesDef);
         System.out.println("typesAsJSON = " + typesAsJSON);
-        if (atlasClient.getType(SPARK_PROCESS) == null) {
+        TypesDef type = null;
+        try {
+            type = atlasClient.getType(SPARK_PROCESS);
+        } catch (AtlasServiceException e) {
+            //ignote
+        }
+        if (type == null) {
             System.out.println("Creating type");
             atlasClient.createType(typesAsJSON);
         } else {
